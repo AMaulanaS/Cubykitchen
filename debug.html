@@ -16,7 +16,7 @@ ul{padding-left:18px;margin:6px 0}pre{background:#0f172a;color:#e2e8f0;padding:1
 <div class="row"><button id="runPublic">Jalankan cek</button></div><div id="pub"></div></div>
 
 <div class="card"><h3>2. Diagnostik admin (butuh PIN)</h3>
-<div class="row"><input id="pin" type="password" placeholder="PIN admin (ADMIN_PIN)"><button id="runAdmin">Jalankan diagnostik</button></div><div id="adm"></div></div>
+<div class="row"><input id="pin" type="password" placeholder="PIN admin"><button id="runAdmin">Jalankan diagnostik</button></div><div id="adm"></div></div>
 
 <div class="card"><h3>3. Tes WhatsApp (butuh PIN di atas)</h3>
 <div class="row"><input id="wa" placeholder="Nomor tujuan, mis. 08123456789"><button class="alt" id="runWa">Kirim pesan tes</button></div><div id="waRes"></div></div>
@@ -50,7 +50,7 @@ $('#runPublic').onclick=async()=>{
 $('#runAdmin').onclick=async()=>{
   const box=$('#adm');box.innerHTML='Memeriksa…';
   try{const {j}=await get({action:'diagnostics',token:$('#pin').value.trim()});
-    if(j.error==='Unauthorized')throw Error('PIN salah, atau Script Property ADMIN_PIN belum dibuat');
+    if(j.error==='Unauthorized')throw Error('PIN salah (cek ADMIN_PIN_CODE di Code.gs & pastikan sudah Deploy New version)');
     if(!j.checks)throw Error(j.error||'Respons tidak dikenal');
     let h='<ul>'+j.checks.map(c=>li(c.ok,c.name,c.info)).join('')+'</ul>';
     const tbl=(t,rows)=>rows&&rows.length?`<h4>${t}</h4><pre>${esc(rows.map(r=>r.join(' | ')).join('\n'))}</pre>`:`<h4>${t}</h4><p class="warn">belum ada data</p>`;
@@ -62,7 +62,7 @@ $('#runAdmin').onclick=async()=>{
 $('#runWa').onclick=async()=>{
   const box=$('#waRes');box.innerHTML='Mengirim…';
   try{const j=await post({action:'testWa',token:$('#pin').value.trim(),target:$('#wa').value.trim()});
-    if(j.error)throw Error(j.error==='Unauthorized'?'PIN salah / ADMIN_PIN belum dibuat':j.error);
+    if(j.error)throw Error(j.error==='Unauthorized'?'PIN salah (cek ADMIN_PIN_CODE di Code.gs)':j.error);
     box.innerHTML=`<p class="${j.ok?'ok':'bad'}">${j.ok?'✔ Fonnte menerima permintaan. Cek WhatsApp tujuan.':'✘ Gagal: '+esc(j.reason)}</p><pre>HTTP ${j.httpCode}\n${esc(j.fonnte)}</pre>`;
   }catch(e){box.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}
 };
