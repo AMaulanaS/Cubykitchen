@@ -1,0 +1,4 @@
+id,no,name,cat,price,old,rating,sold,tag,badge,hot,img,specs,status,stok,berat,unggulan,desc,hargaAgen,minQtyAgen
+beras-5kg,001,Beras Premium 5 kg,Sembako,0,0,,,Contoh produk - ganti harga dan detail sesuai toko,,false,,Kemasan 5 kg,AKTIF,0,5000,false,ISI DESKRIPSI,0,1
+minyak-1l,002,Minyak Goreng 1 L,Sembako,0,0,,,Contoh produk - ganti harga dan detail sesuai toko,,false,,Kemasan 1 liter,AKTIF,0,1000,false,ISI DESKRIPSI,0,1
+gula-1kg,003,Gula Pasir 1 kg,Sembako,0,0,,,Contoh produk - ganti harga dan detail sesuai toko,,false,,Kemasan 1 kg,AKTIF,0,1000,false,ISI DESKRIPSI,0,1
