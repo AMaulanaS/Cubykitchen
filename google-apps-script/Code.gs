@@ -53,7 +53,7 @@ function ensureCols_(name,cols){
   cols.forEach(c=>{ if(h.indexOf(c)<0){ sh.getRange(1,h.length+1).setValue(c); h.push(c); } });
 }
 // PIN admin. Ganti sesuai keinginan, lalu Save dan Deploy versi baru.
-function auth_(t){ const expected=PropertiesService.getScriptProperties().getProperty('ADMIN_PIN'); return !!expected && String(t||'').trim()===expected; }
+function auth_(t){ const expected=PropertiesService.getScriptProperties().getProperty('123123'); return !!expected && String(t||'').trim()===expected; }
 
 /* ================= WHATSAPP OTOMATIS (Fonnte) =================
  * Setiap order masuk, invoice PDF otomatis dikirim dari WA toko ke WA pemesan.
@@ -62,9 +62,9 @@ function auth_(t){ const expected=PropertiesService.getScriptProperties().getPro
  * 3. Jalankan fungsi testKirimWa sekali (izinkan akses), lalu Deploy > New version.
  * Jika token kosong / gagal kirim, order TETAP tersimpan; hasilnya tercatat di sheet LOG_WA.
  */
-const FONNTE_TOKEN = PropertiesService.getScriptProperties().getProperty('FONNTE_TOKEN') || ''; // atur melalui Script Properties
+const FONNTE_TOKEN = PropertiesService.getScriptProperties().getProperty('FONNTE_TOKEN') || 'pdT1ex8ZjW78iM32QtLE'; // atur melalui Script Properties
 const WA_STORE_NAME = 'Cuby Kitchen';
-const WA_SITE_URL = PropertiesService.getScriptProperties().getProperty('SITE_URL') || ''; // isi Script Property SITE_URL = alamat website (tanpa slash akhir) untuk link lacak pesanan
+const WA_SITE_URL = PropertiesService.getScriptProperties().getProperty('SITE_URL') || 'https://sulbiandalan123-web.github.io/Cubykitchen/'; // isi Script Property SITE_URL = alamat website (tanpa slash akhir) untuk link lacak pesanan
 
 function rp_(n){ return 'Rp '+String(Math.round(Number(n)||0)).replace(/\B(?=(\d{3})+(?!\d))/g,'.'); }
 function esc_(v){ return String(v==null?'':v).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
