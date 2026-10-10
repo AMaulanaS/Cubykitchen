@@ -288,7 +288,7 @@ function saveOrder_(d){
     const customerStatus=upsertCustomer_({name,wa,store:String(c.store||'').trim()},type);
     const no='CUBY-'+Utilities.formatDate(new Date(),'Asia/Jakarta','yyMMdd')+'-'+Utilities.getUuid().slice(0,6).toUpperCase();
     const orderSheet=ss_().getSheetByName('PESANAN'), oh=orderSheet.getRange(1,1,1,orderSheet.getLastColumn()).getValues()[0].map(String), row=Array(oh.length).fill('');
-    const vals={orderNo:no,tanggal:new Date(),nama,whatsapp:wa,provinsi:'',kota:shipping.zone||'',alamat:shipping.method==='ANTAR'?String(shipping.address||''):'Ambil di toko',pengiriman:shipping.method==='ANTAR'?'Antar lokal':'Ambil di toko',pembayaran:payment.key==='transfer'?'Transfer bank':'Tunai saat ambil/terima',tenor:'',subtotal:sub,ongkir:ship,dp:0,sisa:0,total,status:'BARU',tipePelanggan:type,namaToko:String(c.store||''),metodeTerima:shipping.method,zonaAntar:shipping.zone||'',statusBayar:payment.key==='transfer'?'MENUNGGU_PEMBAYARAN':'BELUM_DIBAYAR',requestId,statusAgen:customerStatus.statusAgen};
+    const vals={orderNo:no,tanggal:new Date(),nama:name,whatsapp:wa,provinsi:'',kota:shipping.zone||'',alamat:shipping.method==='ANTAR'?String(shipping.address||''):'Ambil di toko',pengiriman:shipping.method==='ANTAR'?'Antar lokal':'Ambil di toko',pembayaran:payment.key==='transfer'?'Transfer bank':'Tunai saat ambil/terima',tenor:'',subtotal:sub,ongkir:ship,dp:0,sisa:0,total,status:'BARU',tipePelanggan:type,namaToko:String(c.store||''),metodeTerima:shipping.method,zonaAntar:shipping.zone||'',statusBayar:payment.key==='transfer'?'MENUNGGU_PEMBAYARAN':'BELUM_DIBAYAR',requestId,statusAgen:customerStatus.statusAgen};
     // ensure statusAgen header exists for clear audit trail
     ensureCols_('PESANAN',['statusAgen']); const oh2=orderSheet.getRange(1,1,1,orderSheet.getLastColumn()).getValues()[0].map(String); if(row.length!==oh2.length)row.length=oh2.length; oh2.forEach((k,i)=>{if(Object.prototype.hasOwnProperty.call(vals,k))row[i]=vals[k]});
     orderSheet.appendRow(row);
@@ -300,7 +300,7 @@ function saveOrder_(d){
     result={ok:true,orderNo:no,totals:{sub,ship,total},agentStatus:customerStatus.statusAgen,wa:{sent:false}};
   } finally { lock.releaseLock(); }
   // WhatsApp/invoice bersifat opsional. Kegagalan pengiriman tidak membatalkan transaksi.
-  try{const detailItems=waItems;const wa=sendOrderWa_(result.orderNo,{customer:{name,wa,city:shipping.zone||'',addr:shipping.address||'Ambil di toko'},shipping:{label:shipping.method==='ANTAR'?'Antar lokal — '+shipping.zone:'Ambil di toko'},payment:{label:payment.key==='transfer'?'Transfer bank':'Tunai saat ambil'},totals:result.totals,items:detailItems});result.wa={sent:!!wa.sent};}catch(err){ waLog_(result.orderNo,'-',false,'Exception: '+(err&&err.message||err)); }
+  try{const detailItems=waItems;const waRes=sendOrderWa_(result.orderNo,{customer:{name,wa,city:shipping.zone||'',addr:shipping.address||'Ambil di toko'},shipping:{label:shipping.method==='ANTAR'?'Antar lokal — '+shipping.zone:'Ambil di toko'},payment:{label:payment.key==='transfer'?'Transfer bank':'Tunai saat ambil'},totals:result.totals,items:detailItems});result.wa={sent:!!waRes.sent};}catch(err){ waLog_(result.orderNo,'-',false,'Exception: '+(err&&err.message||err)); }
   return json_(result);
 }
 
@@ -323,11 +323,11 @@ function orderPublic_(o){
   return copy;
 }
 function getTracking_(orderNo,wa){
-  orderNo=String(orderNo||'').trim(); wa=String(wa||'').replace(/[^0-9]/g,'');
+  orderNo=String(orderNo||'').trim(); wa=waNumber_(wa);
   if(!orderNo) return json_({ok:false,error:'Nomor order wajib diisi'});
   const order=rows_('PESANAN').find(o=>String(o.orderNo).trim().toUpperCase()===orderNo.toUpperCase());
   if(!order) return json_({ok:false,error:'Pesanan tidak ditemukan'});
-  const stored=String(order.whatsapp||'').replace(/[^0-9]/g,'');
+  const stored=waNumber_(order.whatsapp);
   if(wa && stored!==wa) return json_({ok:false,error:'Nomor WhatsApp tidak cocok'});
   if(!wa) return json_({ok:false,error:'Nomor WhatsApp wajib diisi'});
   const items=rows_('DETAIL_PESANAN').filter(x=>String(x.orderNo)===String(order.orderNo)).map(x=>({name:x.productName,qty:Number(x.qty)||0,price:Number(x.harga)||0,subtotal:Number(x.subtotal)||0}));
@@ -362,10 +362,10 @@ function getReport_(month){
   return json_({ok:true,month,stats:{orders:orders.length,validOrders:valid.length,cancelled:orders.length-valid.length,omzet,average:valid.length?omzet/valid.length:0},byStatus,byDay,byPayment});
 }
 function getInvoice_(orderNo,wa){
-  orderNo=String(orderNo||'').trim(); wa=String(wa||'').replace(/[^0-9]/g,'');
+  orderNo=String(orderNo||'').trim(); wa=waNumber_(wa);
   const order=rows_('PESANAN').find(o=>String(o.orderNo).trim().toUpperCase()===orderNo.toUpperCase());
   if(!order) return json_({ok:false,error:'Pesanan tidak ditemukan'});
-  const stored=String(order.whatsapp||'').replace(/[^0-9]/g,'');
+  const stored=waNumber_(order.whatsapp);
   if(!wa || stored!==wa) return json_({ok:false,error:'Nomor WhatsApp tidak cocok'});
   const items=rows_('DETAIL_PESANAN').filter(x=>String(x.orderNo)===String(order.orderNo)).map(x=>({name:x.productName,qty:Number(x.qty)||0,price:Number(x.harga)||0,subtotal:Number(x.subtotal)||0}));
   return json_({ok:true,order:orderPublic_(order),items,store:{name:WA_STORE_NAME,city:'Indonesia'}});
