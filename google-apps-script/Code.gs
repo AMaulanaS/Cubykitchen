@@ -16,7 +16,7 @@
  * Kolom PRODUK:
  * id | no | name | cat | price | old | rating | sold | tag | badge | hot | img | specs | status | stok
  */
-const SPREADSHEET_ID = '1-t04oImAo1x4fmhPI5zqrbQ4aKLVwugkwP73ExC6nM4';
+const SPREADSHEET_ID = '1E_hDm6Kv0jABn_y92aLYnCK0hF_bqc13jNNEQ3_dRWc';
 
 function ss_(){ return SpreadsheetApp.openById(SPREADSHEET_ID); }
 function json_(data){
@@ -43,6 +43,11 @@ function setup(){
   ensureCols_('DETAIL_PESANAN',['hargaNormal','hargaAgen','jenisHarga']);
   return 'OK';
 }
+function ensureSetup_(){
+  // setup() membuka banyak sheet; cukup dijalankan sesekali (cache 6 jam) agar API tidak lambat.
+  const c=CacheService.getScriptCache(); if(c.get('setup_ok')) return;
+  setup(); c.put('setup_ok','1',21600);
+}
 function ensureCols_(name,cols){
   const sh=ss_().getSheetByName(name); const h=sh.getRange(1,1,1,Math.max(1,sh.getLastColumn())).getValues()[0].map(String);
   cols.forEach(c=>{ if(h.indexOf(c)<0){ sh.getRange(1,h.length+1).setValue(c); h.push(c); } });
@@ -58,8 +63,8 @@ function auth_(t){ const expected=PropertiesService.getScriptProperties().getPro
  * Jika token kosong / gagal kirim, order TETAP tersimpan; hasilnya tercatat di sheet LOG_WA.
  */
 const FONNTE_TOKEN = PropertiesService.getScriptProperties().getProperty('FONNTE_TOKEN') || ''; // atur melalui Script Properties
-const WA_STORE_NAME = 'Toko Sembako';
-const WA_SITE_URL = 'https://cofemurdigital-jpg.github.io/Cuby Kitchen/';                        // opsional, cth. https://namamu.github.io/toko (untuk link lacak pesanan)
+const WA_STORE_NAME = 'Cuby Kitchen';
+const WA_SITE_URL = PropertiesService.getScriptProperties().getProperty('SITE_URL') || ''; // isi Script Property SITE_URL = alamat website (tanpa slash akhir) untuk link lacak pesanan
 
 function rp_(n){ return 'Rp '+String(Math.round(Number(n)||0)).replace(/\B(?=(\d{3})+(?!\d))/g,'.'); }
 function esc_(v){ return String(v==null?'':v).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
@@ -97,10 +102,19 @@ function invoiceBlob_(no,d){
 function waLog_(no,target,ok,info){
   try{ sheet_('LOG_WA',['waktu','orderNo','tujuan','status','keterangan']).appendRow([new Date(),no,target,ok?'TERKIRIM':'GAGAL',String(info||'').slice(0,300)]); }catch(_){}
 }
+function fonnteSend_(payload){
+  // Mengembalikan {ok, code, body, reason}. Tidak pernah melempar error.
+  try{
+    if(!FONNTE_TOKEN) return {ok:false,code:0,body:'',reason:'FONNTE_TOKEN belum diisi di Script Properties'};
+    const res=UrlFetchApp.fetch('https://api.fonnte.com/send',{method:'post',headers:{Authorization:FONNTE_TOKEN},payload:payload,muteHttpExceptions:true});
+    const body=res.getContentText(), code=res.getResponseCode(); let j={}; try{j=JSON.parse(body)}catch(_){}
+    const ok=code===200 && j.status!==false;
+    return {ok:ok,code:code,body:body,reason:ok?'':String(j.reason||body||('HTTP '+code))};
+  }catch(err){ return {ok:false,code:0,body:'',reason:String(err&&err.message||err)}; }
+}
 function sendOrderWa_(no,d){
   const target=waNumber_(d.customer&&d.customer.wa);
   try{
-    if(!FONNTE_TOKEN) throw new Error('FONNTE_TOKEN belum diisi');
     if(target.length<10) throw new Error('Nomor WA tidak valid');
     const t=d.totals||{};
     const msg='Halo *'+(d.customer&&d.customer.name||'')+'*, terima kasih sudah order di *'+WA_STORE_NAME+'* 🙏\n\n'
@@ -108,19 +122,15 @@ function sendOrderWa_(no,d){
       +'No. Order: *'+no+'*\n'
       +'Total: *'+rp_(t.total)+'*'+(t.dp?'\nDP 30% sekarang: '+rp_(t.dp):'')+'\n'
       +'Pengiriman: '+(d.shipping&&d.shipping.label||'-')+'\n\n'
-      +'Invoice PDF terlampir. Instruksi pembayaran akan dikirim tim kami di chat ini maksimal 1×24 jam.'
+      +'Instruksi pembayaran / konfirmasi akan dikirim tim kami di chat ini.'
       +(WA_SITE_URL?'\n\nLacak pesanan: '+WA_SITE_URL.replace(/\/$/,'')+'/tracking.html':'');
-    const pdf=invoiceBlob_(no,d);
-    const res=UrlFetchApp.fetch('https://api.fonnte.com/send',{
-      method:'post',
-      headers:{Authorization:FONNTE_TOKEN},
-      payload:{target:target,message:msg,file:pdf,filename:'Invoice-'+no+'.pdf',countryCode:'62'},
-      muteHttpExceptions:true
-    });
-    const body=res.getContentText(); let j={}; try{j=JSON.parse(body)}catch(_){}
-    if(res.getResponseCode()!==200 || j.status===false) throw new Error(j.reason||body||('HTTP '+res.getResponseCode()));
-    waLog_(no,target,true,body);
-    return {sent:true};
+    // Percobaan 1: pesan + invoice PDF. Jika gagal (mis. paket Fonnte tidak mendukung lampiran), percobaan 2: teks saja.
+    let r, mode='PDF';
+    try{ r=fonnteSend_({target:target,message:msg+'\n\nInvoice PDF terlampir.',file:invoiceBlob_(no,d),filename:'Invoice-'+no+'.pdf',countryCode:'62'}); }
+    catch(err){ r={ok:false,reason:'Gagal membuat PDF: '+(err&&err.message||err)}; }
+    if(!r.ok){ waLog_(no,target,false,'[PDF] '+r.reason); mode='TEKS'; r=fonnteSend_({target:target,message:msg,countryCode:'62'}); }
+    waLog_(no,target,r.ok,'['+mode+'] '+(r.ok?r.body:r.reason));
+    return {sent:r.ok,mode:mode,reason:r.ok?'':r.reason};
   }catch(err){
     waLog_(no,target,false,err&&err.message||err);
     return {sent:false,reason:String(err&&err.message||err)};
@@ -135,11 +145,12 @@ function testKirimWa(){
   Logger.log(JSON.stringify(r)); return r;
 }
 function doGet(e){
-  setup();
+  ensureSetup_();
   const action=(e && e.parameter && e.parameter.action)||'health';
-  if(['dashboard','report','orders','adminProducts'].includes(action) && !auth_(e.parameter.token)) return json_({ok:false,error:'Unauthorized'});
+  if(['dashboard','report','orders','adminProducts','diagnostics'].includes(action) && !auth_(e.parameter.token)) return json_({ok:false,error:'Unauthorized'});
   if(action==='adminProducts') return json_({ok:true,products:getProducts_(true)});
-  if(action==='health') return json_({ok:true,service:'Cuby Kitchen API',time:new Date().toISOString()});
+  if(action==='health') return health_();
+  if(action==='diagnostics') return diagnostics_();
   if(action==='products') return json_({ok:true,products:getProducts_()});
   if(action==='settings') return json_({ok:true,settings:getSettings_()});
   if(action==='dashboard') return getDashboard_();
@@ -151,17 +162,53 @@ function doGet(e){
 }
 function doPost(e){
   try{
-    setup();
+    ensureSetup_();
     const data=JSON.parse((e.postData&&e.postData.contents)||'{}');
-    if(['updateStatus','saveProduct','deleteProduct','saveSettings','uploadImage'].includes(data.action) && !auth_(data.token)) return json_({ok:false,error:'Unauthorized'});
+    if(['updateStatus','saveProduct','deleteProduct','saveSettings','uploadImage','testWa'].includes(data.action) && !auth_(data.token)) return json_({ok:false,error:'Unauthorized'});
     if(data.action==='saveProduct') return saveProduct_(data);
     if(data.action==='saveSettings') return saveSettings_(data);
     if(data.action==='uploadImage') return uploadImage_(data);
     if(data.action==='deleteProduct') return deleteProduct_(data);
+    if(data.action==='testWa') return testWa_(data);
     if(data.action==='order') return saveOrder_(data);
     if(data.action==='updateStatus') return updateStatus_(data);
     return json_({ok:false,error:'Unknown action'});
   }catch(err){ return json_({ok:false,error:String(err)}); }
+}
+/* ================= DEBUG / DIAGNOSTIK ================= */
+function health_(){
+  let sheetOk=false; try{ ss_().getName(); sheetOk=true; }catch(_){}
+  return json_({ok:true,service:'Cuby Kitchen API',time:new Date().toISOString(),sheetOk:sheetOk});
+}
+// Hanya admin (PIN). Tidak pernah menampilkan nilai PIN/token, hanya ada/tidaknya.
+function diagnostics_(){
+  const out={ok:true,time:new Date().toISOString(),tz:Session.getScriptTimeZone(),spreadsheetId:SPREADSHEET_ID,checks:[]};
+  const add=(name,ok,info)=>out.checks.push({name:name,ok:!!ok,info:info==null?'':String(info)});
+  try{ CacheService.getScriptCache().remove('setup_ok'); setup(); }catch(e){ add('setup()',false,e); }
+  let ss=null;
+  try{ ss=ss_(); add('Akses spreadsheet',true,ss.getName()); }catch(e){ add('Akses spreadsheet',false,'Tidak bisa membuka Sheet. Pastikan akun pemilik deployment punya akses Editor. '+e); return json_(Object.assign(out,{ok:false})); }
+  const props=PropertiesService.getScriptProperties();
+  add('Script Property ADMIN_PIN',!!props.getProperty('ADMIN_PIN'),'');
+  add('Script Property FONNTE_TOKEN',!!props.getProperty('FONNTE_TOKEN'),'wajib agar WhatsApp terkirim');
+  add('Script Property SITE_URL',!!props.getProperty('SITE_URL'),'opsional: untuk link lacak pesanan di WA');
+  const need=['PRODUK','PESANAN','DETAIL_PESANAN','PENGATURAN','PELANGGAN','MUTASI_STOK','LOG_AKTIVITAS'];
+  out.sheets={}; need.concat(['LOG_WA']).forEach(n=>{ const sh=ss.getSheetByName(n); out.sheets[n]=sh?Math.max(0,sh.getLastRow()-1):null; if(need.indexOf(n)>=0) add('Sheet '+n,!!sh,sh?(Math.max(0,sh.getLastRow()-1)+' baris data'):'tidak ada'); });
+  try{
+    const ps=getProducts_(true), aktif=ps.filter(p=>String(p.status||'').toUpperCase()!=='NONAKTIF');
+    add('Produk aktif',aktif.length>0,aktif.length+' aktif dari '+ps.length);
+    const bad=aktif.filter(p=>!(Number(p.price)>0)); add('Produk harga valid',bad.length===0,bad.length?('harga 0/kosong: '+bad.slice(0,5).map(p=>p.id).join(', ')):'semua > 0');
+    const notrack=aktif.filter(p=>p.stok===null); add('Produk dengan stok terisi',notrack.length===0,notrack.length?(notrack.length+' produk stok kosong (tidak dilacak)'):'semua terisi');
+  }catch(e){ add('Baca produk',false,e); }
+  const tail=(n,k)=>{ try{ const sh=ss.getSheetByName(n); if(!sh||sh.getLastRow()<2) return []; const last=sh.getLastRow(), from=Math.max(2,last-k+1); return sh.getRange(from,1,last-from+1,sh.getLastColumn()).getValues().map(r=>r.map(v=>v instanceof Date?v.toISOString():String(v).slice(0,200))).reverse(); }catch(_){ return []; } };
+  out.lastWa=tail('LOG_WA',10); out.lastLog=tail('LOG_AKTIVITAS',10);
+  return json_(out);
+}
+// Kirim pesan tes lewat Fonnte (admin). Mengembalikan jawaban mentah Fonnte agar mudah di-debug.
+function testWa_(d){
+  const target=waNumber_(d.target); if(target.length<10) return json_({ok:false,error:'Nomor tujuan tidak valid'});
+  const r=fonnteSend_({target:target,message:String(d.message||'Tes WhatsApp dari '+WA_STORE_NAME+' — jika pesan ini masuk, integrasi Fonnte berfungsi ✅').slice(0,500),countryCode:'62'});
+  waLog_('TES-WA',target,r.ok,'[TES] '+(r.ok?r.body:r.reason));
+  return json_({ok:r.ok,httpCode:r.code,reason:r.reason,fonnte:String(r.body||'').slice(0,500)});
 }
 function getProducts_(all){
   const sh=ss_().getSheetByName('PRODUK');
@@ -209,9 +256,9 @@ function saveOrder_(d){
   if(!Array.isArray(d.items)||!d.items.length||d.items.length>100) return json_({ok:false,error:'Keranjang kosong atau jumlah item tidak valid'});
   const requestId=String(d.requestId||'').slice(0,100); if(!requestId) return json_({ok:false,error:'ID permintaan tidak valid'});
   const lock=LockService.getScriptLock(); lock.waitLock(15000);
-  let result;
+  let result, waItems=[];
   try{
-    setup();
+    ensureSetup_();
     // Cegah pesanan duplikat ketika browser mengirim ulang permintaan yang sama.
     const existing=rows_('PESANAN').find(o=>String(o.requestId||'')===requestId);
     if(existing) return json_({ok:true,orderNo:String(existing.orderNo),totals:{sub:Number(existing.subtotal)||0,ship:Number(existing.ongkir)||0,total:Number(existing.total)||0},agentStatus:String(existing.statusAgen||''),duplicate:true});
@@ -247,10 +294,11 @@ function saveOrder_(d){
     details.forEach(it=>{const r=Array(dh.length).fill(''), dv={orderNo:no,productId:it.id,productName:it.name,qty:it.qty,harga:it.price,subtotal:it.line,hargaNormal:it.normal,hargaAgen:it.agent,jenisHarga:it.useAgent?'AGEN':'ECERAN'};dh.forEach((k,i)=>{if(Object.prototype.hasOwnProperty.call(dv,k))r[i]=dv[k]});ds.appendRow(r);});
     stockChanges.forEach(sc=>{const stc=col('stok');ps.getRange(sc.row,stc+1).setValue(sc.after);ss_().getSheetByName('MUTASI_STOK').appendRow(['MUT-'+Utilities.getUuid().slice(0,8),new Date(),sc.id,sc.name,'PENJUALAN',0,sc.qty,sc.before,sc.after,no,'Pengurangan stok dari checkout']);});
     ss_().getSheetByName('LOG_AKTIVITAS').appendRow([new Date(),'SISTEM','PESANAN_BARU',no,'Checkout tervalidasi server']);
+    waItems=details.map(it=>({id:it.id,name:it.name,qty:it.qty,price:it.price}));
     result={ok:true,orderNo:no,totals:{sub,ship,total},agentStatus:customerStatus.statusAgen,wa:{sent:false}};
   } finally { lock.releaseLock(); }
   // WhatsApp/invoice bersifat opsional. Kegagalan pengiriman tidak membatalkan transaksi.
-  try{const detailItems=(d.items||[]).map(it=>({id:it.id,name:it.name,qty:it.qty,price:it.price}));const wa=sendOrderWa_(result.orderNo,{customer:{name,wa,city:shipping.zone||'',addr:shipping.address||'Ambil di toko'},shipping:{label:shipping.method==='ANTAR'?'Antar lokal — '+shipping.zone:'Ambil di toko'},payment:{label:payment.key==='transfer'?'Transfer bank':'Tunai saat ambil'},totals:result.totals,items:detailItems});result.wa={sent:!!wa.sent};}catch(_){ }
+  try{const detailItems=waItems;const wa=sendOrderWa_(result.orderNo,{customer:{name,wa,city:shipping.zone||'',addr:shipping.address||'Ambil di toko'},shipping:{label:shipping.method==='ANTAR'?'Antar lokal — '+shipping.zone:'Ambil di toko'},payment:{label:payment.key==='transfer'?'Transfer bank':'Tunai saat ambil'},totals:result.totals,items:detailItems});result.wa={sent:!!wa.sent};}catch(err){ waLog_(result.orderNo,'-',false,'Exception: '+(err&&err.message||err)); }
   return json_(result);
 }
 
@@ -318,7 +366,7 @@ function getInvoice_(orderNo,wa){
   const stored=String(order.whatsapp||'').replace(/[^0-9]/g,'');
   if(!wa || stored!==wa) return json_({ok:false,error:'Nomor WhatsApp tidak cocok'});
   const items=rows_('DETAIL_PESANAN').filter(x=>String(x.orderNo)===String(order.orderNo)).map(x=>({name:x.productName,qty:Number(x.qty)||0,price:Number(x.harga)||0,subtotal:Number(x.subtotal)||0}));
-  return json_({ok:true,order:orderPublic_(order),items,store:{name:'Toko Sembako',city:'Indonesia'}});
+  return json_({ok:true,order:orderPublic_(order),items,store:{name:WA_STORE_NAME,city:'Indonesia'}});
 }
 
 function updateStatus_(d){

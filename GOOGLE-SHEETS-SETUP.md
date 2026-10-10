@@ -4,7 +4,7 @@ ZIP ini sudah disiapkan untuk memakai Google Sheets sebagai database produk dan 
 
 ## 1. Google Sheet
 Gunakan spreadsheet yang sudah kamu kirim:
-`https://docs.google.com/spreadsheets/d/1-t04oImAo1x4fmhPI5zqrbQ4aKLVwugkwP73ExC6nM4/edit`
+`https://docs.google.com/spreadsheets/d/1E_hDm6Kv0jABn_y92aLYnCK0hF_bqc13jNNEQ3_dRWc/edit`
 
 ## 2. Apps Script
 Buka spreadsheet → **Extensions → Apps Script**.

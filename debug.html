@@ -1,0 +1,69 @@
+<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cuby Kitchen — Debug</title>
+<style>
+body{font:14px/1.5 system-ui,sans-serif;max-width:860px;margin:24px auto;padding:0 16px;color:#1b2229}
+h1{margin:0 0 4px}.sub{color:#6f7278;margin:0 0 18px}
+.card{border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;margin:12px 0}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input{padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;min-width:200px}
+button{padding:8px 14px;border:0;border-radius:8px;background:#03ac0e;color:#fff;font-weight:600;cursor:pointer}
+button.alt{background:#334155}
+.ok{color:#047857}.bad{color:#b91c1c}.warn{color:#b45309}
+ul{padding-left:18px;margin:6px 0}pre{background:#0f172a;color:#e2e8f0;padding:10px;border-radius:8px;overflow:auto;font-size:12px;max-height:260px}
+</style></head><body>
+<h1>Debug Cuby Kitchen</h1><p class="sub">Cek konfigurasi, Apps Script, Google Sheets, dan WhatsApp (Fonnte) dari satu halaman. Tidak ada PIN/token yang disimpan di halaman ini.</p>
+
+<div class="card"><h3>1. Cek publik (tanpa PIN)</h3>
+<div class="row"><button id="runPublic">Jalankan cek</button></div><div id="pub"></div></div>
+
+<div class="card"><h3>2. Diagnostik admin (butuh PIN)</h3>
+<div class="row"><input id="pin" type="password" placeholder="PIN admin (ADMIN_PIN)"><button id="runAdmin">Jalankan diagnostik</button></div><div id="adm"></div></div>
+
+<div class="card"><h3>3. Tes WhatsApp (butuh PIN di atas)</h3>
+<div class="row"><input id="wa" placeholder="Nomor tujuan, mis. 08123456789"><button class="alt" id="runWa">Kirim pesan tes</button></div><div id="waRes"></div></div>
+
+<script src="js/config.js"></script><script src="js/debug.js"></script>
+<script>
+const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const li=(ok,t,info)=>`<li class="${ok===true?'ok':ok===false?'bad':'warn'}">${ok===true?'✔':ok===false?'✘':'⚠'} <b>${esc(t)}</b>${info?' — '+esc(info):''}</li>`;
+const API=STORE_CONFIG.apiUrl;
+async function get(q){const t=performance.now();const r=await fetch(API+'?'+new URLSearchParams(q),{cache:'no-store'});const txt=await r.text();let j;try{j=JSON.parse(txt)}catch(_){throw Error('Respons bukan JSON (HTTP '+r.status+'). Awal respons: '+txt.slice(0,120).replace(/\s+/g,' '))}return{j,ms:Math.round(performance.now()-t)}}
+async function post(b){const r=await fetch(API,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(b)});const txt=await r.text();try{return JSON.parse(txt)}catch(_){throw Error('Respons bukan JSON: '+txt.slice(0,120))}}
+
+$('#runPublic').onclick=async()=>{
+  const out=[];const box=$('#pub');box.innerHTML='Memeriksa…';
+  const urlOk=/^https:\/\/script\.google\.com\/.+\/exec$/.test(API||'');
+  out.push(li(urlOk,'apiUrl di js/config.js',urlOk?API:'belum valid / masih placeholder'));
+  out.push(li(!/ISI/i.test(STORE_CONFIG.whatsapp),'Nomor WhatsApp toko (config.js)',STORE_CONFIG.whatsapp));
+  out.push(li(!/ISI/i.test(STORE_CONFIG.city),'Alamat toko (config.js)',STORE_CONFIG.city));
+  if(urlOk){
+    try{const {j,ms}=await get({action:'health'});out.push(li(!!j.ok,'Apps Script merespons',ms+' ms'));out.push(li(j.sheetOk===true,'Apps Script bisa membuka Google Sheet',j.sheetOk===true?'':'Gagal. Pastikan SPREADSHEET_ID benar & pemilik deployment punya akses Editor ke Sheet'));}
+    catch(e){out.push(li(false,'Apps Script merespons',e.message+' — cek: (a) URL /exec benar, (b) Deploy > "Who has access" = Anyone, (c) sudah "New version" setelah edit kode'))}
+    try{const {j}=await get({action:'products'});if(!j.ok)throw Error(j.error);const n=j.products.length;out.push(li(n>0,'Produk dari Sheet PRODUK',n+' produk'+(n?'':' — sheet kosong, website akan memakai katalog contoh & checkout gagal')));
+      const bad=j.products.filter(p=>!(p.price>0));if(n)out.push(li(bad.length===0,'Harga produk valid',bad.length?bad.length+' produk harga 0: '+bad.slice(0,5).map(p=>p.id).join(', '):'semua > 0'));
+      const nt=j.products.filter(p=>p.stok===null);if(n)out.push(li(nt.length===0?true:null,'Stok terisi',nt.length?nt.length+' produk tanpa stok (stok tidak dilacak)':'semua terisi'));}
+    catch(e){out.push(li(false,'Ambil produk',e.message))}
+    try{const {j}=await get({action:'settings'});out.push(li(!!j.ok,'Pengaturan toko (sheet PENGATURAN)',j.ok?(Object.keys(j.settings||{}).length?'terisi':'kosong → memakai default config.js'):j.error))}catch(e){out.push(li(false,'Ambil pengaturan',e.message))}
+  }
+  box.innerHTML='<ul>'+out.join('')+'</ul>';
+};
+
+$('#runAdmin').onclick=async()=>{
+  const box=$('#adm');box.innerHTML='Memeriksa…';
+  try{const {j}=await get({action:'diagnostics',token:$('#pin').value.trim()});
+    if(j.error==='Unauthorized')throw Error('PIN salah, atau Script Property ADMIN_PIN belum dibuat');
+    if(!j.checks)throw Error(j.error||'Respons tidak dikenal');
+    let h='<ul>'+j.checks.map(c=>li(c.ok,c.name,c.info)).join('')+'</ul>';
+    const tbl=(t,rows)=>rows&&rows.length?`<h4>${t}</h4><pre>${esc(rows.map(r=>r.join(' | ')).join('\n'))}</pre>`:`<h4>${t}</h4><p class="warn">belum ada data</p>`;
+    h+=tbl('Log WhatsApp terakhir (LOG_WA)',j.lastWa)+tbl('Aktivitas terakhir (LOG_AKTIVITAS)',j.lastLog);
+    box.innerHTML=h;
+  }catch(e){box.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}
+};
+
+$('#runWa').onclick=async()=>{
+  const box=$('#waRes');box.innerHTML='Mengirim…';
+  try{const j=await post({action:'testWa',token:$('#pin').value.trim(),target:$('#wa').value.trim()});
+    if(j.error)throw Error(j.error==='Unauthorized'?'PIN salah / ADMIN_PIN belum dibuat':j.error);
+    box.innerHTML=`<p class="${j.ok?'ok':'bad'}">${j.ok?'✔ Fonnte menerima permintaan. Cek WhatsApp tujuan.':'✘ Gagal: '+esc(j.reason)}</p><pre>HTTP ${j.httpCode}\n${esc(j.fonnte)}</pre>`;
+  }catch(e){box.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}
+};
+</script></body></html>
